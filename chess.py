@@ -5,7 +5,7 @@ from typing import List, Tuple
 
 from pieces import Piece, BlankPiece, Pawn, Knight, Bishop, Rook, Queen, King
 
-starting_fenstring = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR'
+starting_fenstring = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR'  # Standard starting position of a chess board
 
 def get_row(pos: int) -> float:
     """
@@ -22,75 +22,40 @@ def get_file(pos: int) -> float:
 
 
 class ChessGame:
+    """
+    Class representing a single instance of a game of chess
+    """
 
-    win_width: int
-    win_height: int
+    square_size: float  # The size of each square of the chess board
 
-    square_size: float    
-
-    board: List[Piece]
-    board_rects: List[pygame.Rect]
-
-    highlight_rects: List[Tuple[pygame.Rect, Tuple[int]]]
-    highlight_alpha: int = 77  # 50% transparancy  on highlighted squares
+    board: List[Piece]  # Array that holds each Piece class representing positions on the board
 
     selected_piece: int  # Holds the position of the selected piece
 
     running: bool
-    move_made: bool
 
     current_color: Piece  # Makes a copy of the selected piece
 
-    color_map = {'Colorless': 0, 'Black': -1, 'White': 1}
+    color_map = {'Colorless': 0, 'Black': -1, 'White': 1}  # Simple dict to make certain pieces of code more readable
 
     def __init__(self) -> None:
-        pygame.init()
+        """
+        Constructor for the ChessGame class
+        """
 
-        # Setting up a pygame windows
-        self.win_width, self.win_height = 800, 800
-        self.window = pygame.display.set_mode(
-            (self.win_width, self.win_height))
+        self.square_size = 25
 
-        pygame.display.set_caption('Chess')  # Setting the name of window
-
-        self.square_size = self.win_width / 8
-
-        self.board = []  # Holds the position of each piece on the board
-
-        self.board.append(King(0, 1))
-        self.board[0].scale_sprite(int(self.square_size), int(self.square_size))
-
-        # Hold the rectangles that are drawn to make up the chessboard
-        self.board_rects = []  
-
-        # Initializing the board_rects array
-        for i in range(64):
-            row = math.floor(i / 8)
-            file = i % 8
-
-            self.board_rects.append(pygame.Rect(file * self.square_size, row
-                                                * self.square_size,
-                                                self.square_size,
-                                                self.square_size))
-
+        self.board = []
         self.highlight_rects = []  # Contains rects to highlight certain squares on the board
-
-        # Color variables
-        self._light_color = pygame.Color(240, 240, 240)
-        self._dark_color = pygame.Color(46, 139, 87)
-        self._highlight_color = pygame.Color(255, 0, 0)
+        self.history = []
 
         self.selected_piece = BlankPiece(-1)
 
-        self.move_made = True
         self.running = True
 
-        self.current_color = self.color_map['Black']  # Switched right at beginning of the game
+        self.current_color = self.color_map['Black'] 
 
-        # Loading the starting board
-        self.load_fenstring(starting_fenstring)
-
-        self.history = []
+        
 
     def load_fenstring(self, fenstring:str=starting_fenstring) -> None:
         """
@@ -119,62 +84,192 @@ class ChessGame:
                 piece = piece_types[char.lower()](row * 8 + file, color)
                 piece.scale_sprite(int(self.square_size), int(self.square_size))
                 
+                if fenstring == starting_fenstring and (type(piece) == King 
+                        or type(piece) == Rook):
+                    piece.can_castle = True
+
                 self.board.append(piece)
                 file += 1
 
-    def move(self, initial_pos:int, final_pos:int) -> None:
-        moving_piece = self.board[initial_pos]
+        self.update_new_position()
 
-        self.board[final_pos] = type(moving_piece)(final_pos, 
-                                moving_piece.color_val)
+    def move(self, initial_pos:int, final_pos:int) -> None:
+        """
+        Moves a chess piece
+        """
+        
+        selected_piece:Piece = self.board[initial_pos]
+        piece_type = type(selected_piece)
+
+        if (piece_type == Pawn and (get_row(final_pos) == 0 
+                or get_row(final_pos) == 7)):
+            piece_type = Queen
+        
+        self.board[final_pos] = piece_type(final_pos, 
+                                    selected_piece.color_val)
         self.board[final_pos].scale_sprite(int(self.square_size), 
                                            int(self.square_size))
 
         self.board[initial_pos] = BlankPiece(initial_pos)
 
         self.selected_piece = BlankPiece(-1)
-        self.gen_highlighted()
-        self.move_made = True
+
+        # Moving Rook when castling
+        if type(selected_piece) == King and final_pos in selected_piece.castle_moves:
+            if final_pos > selected_piece.pos:
+                self.move(selected_piece.pos + 3, final_pos - 1)
+            else:
+                self.move(selected_piece.pos - 4, final_pos + 1)
 
     def undo_move(self) -> None:
-        print('undo')
-
+        """
+        Undoes a move just made
+        
+        Has a limit of 10 moves of history
+        """
+        
         if self.history:
 
             self.board = self.history[-1]
             del self.history[-1]
 
-            self.move_made = True
+            self.update_new_position()
         else:
             print("You can not undo anymore")
 
     def update_history(self):
+        """
+        Adds the current state to the history array and removes the first
+        state if the limit is exceeded (limit:int = 10)
+        """
+
         self.history.append(self.board.copy())
 
         if len(self.history) > 10:
             del self.history[0]
 
+    def update_new_position(self) -> None:
+        """
+        Function that runs directly after a move is made
+        """
+
+        self.gen_legal_moves()
+        self.current_color *= -1  # Switching current color
+
+    
+
     def gen_legal_moves(self) -> None:
+        """
+        Loops over each piece in chess.board and updates what legal moves they 
+        can make
+        """
+
         for piece in self.board:
             piece.gen_legal_moves(self.board)
 
-    def gen_highlighted(self) -> None:
+        king_start_pos = [4, 60]
+        for i in king_start_pos:
+            king = self.board[i]
+
+            if type(king) == King:
+                if king.can_castle:
+                    king.check_castle(self.board)
+
+    def set_square_size(self, square_size: int) -> None:
+        
+        self.square_size = square_size
+
+        for piece in self.board:
+            piece.scale_sprite(int(self.square_size), int(self.square_size))
+
+
+class WindowManager:
+    """
+    Class to manage all the rendering displaying and user input
+    """
+
+    win_width: int 
+    win_height: int 
+
+    window: pygame.Surface
+
+    square_size: float  # The width/height of across for each tile of the board
+
+    board_rects: List[pygame.Rect]  # List holding colored squares representing the chess board
+    
+    # Hold the rectangles that are drawn to make up the chessboard.
+    # Surface used instead of Rect for transparancy
+    highlight_rects: List[Tuple[pygame.Surface, Tuple[int]]]
+    highlight_alpha: int  # defines how transparent highlighted squares are
+
+    _light_color: pygame.Color 
+    _dark_color: pygame.Color
+    _highlight_color: pygame.Color   
+
+    def __init__(self, window_width: int, window_height: int, name: str="Chess") -> None:
+        """
+        Window Manager constructor
+        """
+        
+        pygame.init()
+
+
+        self.win_width = window_width
+        self.win_height = window_height
+
+        self.window = pygame.display.set_mode((self.win_width, self.win_height))
+
+        pygame.display.set_caption(name)
+
+        self.square_size = self.win_width / 8 
+
+        self.board_rects = [] 
+
+        # Initializing the board_rects array
+        for i in range(64):
+            row = math.floor(i / 8)
+            file = i % 8
+
+            self.board_rects.append(pygame.Rect(file * self.square_size, row
+                                                * self.square_size,
+                                                self.square_size,
+                                                self.square_size))
+
+        self.highlight_rects = []
+        self.highlight_alpha = 77  # 77 -> 50% transparancy
+
+        # Colors
+        self._light_color = pygame.Color(240, 240, 240)
+        self._dark_color = pygame.Color(46, 139, 87)
+        self._highlight_color = pygame.Color(255, 0, 0)
+
+        self.chess_game = ChessGame()
+
+    def highlight_legal_moves(self, selected_piece: Piece) -> None:
+        """
+        Highlights all tiles a selected piece can move to
+        """
+
         self.highlight_rects.clear()
 
-        # for piece in self.board:
-        for move in self.selected_piece.moves:
+        moves:List[int] = selected_piece.moves
 
-            row = math.floor(move / 8)
-            file = move % 8
+        if type(selected_piece) == King:
+            moves += selected_piece.castle_moves
+
+        for move in moves:
+
+            row = get_row(move)
+            file = get_file(move)
 
             rect = pygame.Surface((self.square_size, self.square_size))
-            rect.set_alpha(self.highlight_alpha)
+            rect.set_alpha(self.highlight_alpha)  # Adding transparancy
             rect.fill(self._highlight_color)
             pos = (file * self.square_size, row * self.square_size)
 
             self.highlight_rects.append((rect, pos))
 
-    def poll_events(self) -> None:
+    def poll_events(self, curr_game: ChessGame) -> None:
         """
         Takes input from the user
         """
@@ -183,7 +278,7 @@ class ChessGame:
             
             # Quitting the window
             if event.type == pygame.QUIT:
-                self.running = False
+                curr_game.running = False
 
             # Mouse input
             if event.type == pygame.MOUSEBUTTONUP:
@@ -194,21 +289,27 @@ class ChessGame:
                 file = math.floor(x / self.square_size)
                 pos = row * 8 + file
 
-                if pos in self.selected_piece.moves:
-                    self.update_history()
-                    self.move(self.selected_piece.pos, pos)
-                    
-                elif self.board[pos].color_val != -self.current_color:
-                    self.selected_piece = self.board[pos]
-                    self.gen_highlighted()
+                # Selecting where to move a piece (2nd click)
+                if pos in curr_game.selected_piece.moves:
+                    curr_game.update_history()
+                    curr_game.move(curr_game.selected_piece.pos, pos)
+                    curr_game.update_new_position()
+
+                    self.highlight_rects.clear()
+                # Selecting a piece
+                elif curr_game.board[pos].color_val == curr_game.current_color:
+                    curr_game.selected_piece = curr_game.board[pos]
+                    self.highlight_legal_moves(curr_game.selected_piece)
+                else:
+                    curr_game.selected_piece = BlankPiece(-1)
+                    self.highlight_rects.clear()
             
             # Keyboard input
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_u:
-                    self.undo_move()
+                    curr_game.undo_move()
 
-
-    def render_window(self) -> None:
+    def render_window(self, chess_board: List[Piece]) -> None:
         """
         Function containing code to render to the pygame window
         """
@@ -224,13 +325,12 @@ class ChessGame:
             self.window.blit(rect, pos) 
 
         # Drawing the chess pieces on the board
-        for piece in self.board:
+        for piece in chess_board:
             if type(piece) != BlankPiece:
                 self.window.blit(piece.sprite, (piece.file * self.square_size,
                                 piece.row * self.square_size))
        
         pygame.display.update()
-
 
 if __name__ == '__main__':
     chess = ChessGame()
